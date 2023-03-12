@@ -3,15 +3,97 @@ use std::{env, fs::File, io::Write};
 
 use crate::preview::preview_glyph;
 
+mod header_block;
 mod preview;
 
 fn main() {
-    let font = bdf::open(env::args().nth(1).expect("Missing font file")).unwrap();
+    let font = bdf::open(
+        env::args()
+            .nth(1)
+            .expect("ファイル名の引数を指定してください"),
+    )
+    .expect("BDF ファイルを開けませんでした");
+
     let glyphs = font.glyphs();
 
-    let mut file = File::create("font.bin").expect("Cannot create file");
+    let mut font_header =
+        File::create("fontHeader.bin").expect("フォントファイルを作成できませんでした");
+    let mut font_body =
+        File::create("fontBody.bin").expect("フォントファイルを作成できませんでした");
 
-    for (_, glyph) in glyphs {
+    let mut counter: u32 = 0;
+
+    // TODO: ホントは 0x10000 個じゃなくて 0x20000 個なので作り変える
+    for index in 0..=0xFFFF {
+        let mut binary: Vec<u8> = Vec::new();
+
+        let char = match char::from_u32(index) {
+            Some(char) => char,
+            None => {
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+
+                font_header.write_all(&binary).expect("Cannot write");
+
+                continue;
+            }
+        };
+
+        match glyphs.get(&char) {
+            Some(_) => {}
+            None => {
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+                binary.push(0x00);
+
+                font_header.write_all(&binary).expect("Cannot write");
+
+                continue;
+            }
+        };
+
+        let byte2: u8 = ((counter >> 16) & 0x0000FF).try_into().unwrap();
+        let byte1: u8 = ((counter >> 8) & 0x0000FF).try_into().unwrap();
+        let byte0: u8 = ((counter) & 0x0000FF).try_into().unwrap();
+
+        binary.push(0x01); // ヘッダー(0b0000_000a)
+        binary.push(byte2); // パターンデータのインデックス(3 byte)
+        binary.push(byte1); //
+        binary.push(byte0); //
+        binary.push(0x10); // 文字の横幅(pixel)
+        binary.push(0x10); // 文字の縦幅(pixel)
+        binary.push(0x10); // 文字の横送り量(pixel)
+        binary.push(0x00); // 未使用
+
+        font_header.write_all(&binary).expect("Cannot write");
+
+        counter += 1;
+    }
+
+    // Header block を書き込む
+
+    for index in 0x3041..=0xFFFF {
+        let char = match char::from_u32(index) {
+            Some(char) => char,
+            None => continue,
+        };
+
+        let glyph = match glyphs.get(&char) {
+            Some(glyph) => glyph,
+            None => continue,
+        };
+
         let mut binary: Vec<u8> = Vec::new();
 
         for y in 0..16 {
@@ -38,8 +120,6 @@ fn main() {
             binary.push(byte_right);
         }
 
-        preview_glyph(glyph);
-
         // 16x16 のタイルの場合、視覚的に正方形のグラフィックデータを 8×8 ずつで 4つに分割し、以下のように並んでいると考えると、
         // AB
         // CD
@@ -56,6 +136,6 @@ fn main() {
             binary[31], // Dブロック
         ];
 
-        file.write_all(&remapped_binary).expect("Cannot write");
+        font_body.write_all(&remapped_binary).expect("Cannot write");
     }
 }
