@@ -83,7 +83,7 @@ fn main() {
 
     // Header block を書き込む
 
-    for index in 0x3041..=0xFFFF {
+    for index in 0x0000..=0xFFFF {
         let char = match char::from_u32(index) {
             Some(char) => char,
             None => continue,
